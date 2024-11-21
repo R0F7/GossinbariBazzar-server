@@ -3,7 +3,7 @@ const app = express();
 require("dotenv").config();
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
 
 const port = process.env.PORT || 7777;
@@ -47,6 +47,7 @@ async function run() {
     const db = client.db("GossainbariBazzer");
 
     const usersCollection = db.collection("users");
+    const productsCollection = db.collection("products");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -98,6 +99,20 @@ async function run() {
         $set: { ...user, timestamp: Date.now() },
       };
       const result = await usersCollection.updateOne(query, updateDoc, options);
+      res.send(result);
+    });
+
+    //all products
+    app.get("/products", async (req, res) => {
+      const result = await productsCollection.find().toArray();
+      res.send(result);
+    });
+
+    //single product
+    app.get("/product/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.findOne(query);
       res.send(result);
     });
 
