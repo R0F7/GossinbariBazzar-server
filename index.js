@@ -48,7 +48,7 @@ async function run() {
 
     const usersCollection = db.collection("users");
     const productsCollection = db.collection("products");
-    const reviewsCollection = db.collection("reviews")
+    const reviewsCollection = db.collection("reviews");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -118,11 +118,19 @@ async function run() {
     });
 
     //save review in db
-    app.post("/review",async (req,res)=>{
-        const review_info = req.body;
-        const result = await reviewsCollection.insertOne(review_info);
-        res.send(result)
-    })
+    app.post("/review", async (req, res) => {
+      const review_info = req.body;
+      const result = await reviewsCollection.insertOne(review_info);
+      res.send(result);
+    });
+
+    //get specific reviews
+    app.get("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { product_id: id };
+      const result = await reviewsCollection.find(query).toArray();
+      res.send(result)
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
