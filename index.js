@@ -48,6 +48,7 @@ async function run() {
 
     const usersCollection = db.collection("users");
     const productsCollection = db.collection("products");
+    const reviewsCollection = db.collection("reviews")
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -115,6 +116,13 @@ async function run() {
       const result = await productsCollection.findOne(query);
       res.send(result);
     });
+
+    //save review in db
+    app.post("/review",async (req,res)=>{
+        const review_info = req.body;
+        const result = await reviewsCollection.insertOne(review_info);
+        res.send(result)
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
