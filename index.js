@@ -49,6 +49,7 @@ async function run() {
     const usersCollection = db.collection("users");
     const productsCollection = db.collection("products");
     const reviewsCollection = db.collection("reviews");
+    const cardAddedProducts = db.collection("card");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -129,7 +130,41 @@ async function run() {
       const { id } = req.params;
       const query = { product_id: id };
       const result = await reviewsCollection.find(query).toArray();
-      res.send(result)
+      res.send(result);
+    });
+
+    //add product in card
+    app.put("/add-product-in-card", async (req, res) => {
+      const product_info = req.body;
+      const query = { id: product_info.id };
+
+      const isExist = await cardAddedProducts.findOne(query);
+      if (isExist) {
+        const result = await cardAddedProducts.updateOne(query, {
+          $set: { quantity: product_info.quantity },
+        });
+
+        return res.send(result);
+      }
+
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: { ...product_info, timestamp: Date.now() },
+      };
+      const result = await cardAddedProducts.updateOne(
+        query,
+        updateDoc,
+        options
+      );
+      res.send(result);
+    });
+
+    //get active user card product
+    app.get("/products-in-card/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { "order_owner_info.email": email };
+      const result = await cardAddedProducts.find(query).toArray();
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
