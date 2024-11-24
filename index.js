@@ -136,7 +136,12 @@ async function run() {
     //add product in card
     app.put("/add-product-in-card", async (req, res) => {
       const product_info = req.body;
-      const query = { id: product_info.id };
+      // console.log(product_info.order_owner_info.email);
+      
+      const query = {
+        id: product_info.id,
+        "order_owner_info.email": product_info.order_owner_info.email,
+      };
 
       const isExist = await cardAddedProducts.findOne(query);
       if (isExist) {
