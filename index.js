@@ -49,7 +49,7 @@ async function run() {
     const usersCollection = db.collection("users");
     const productsCollection = db.collection("products");
     const reviewsCollection = db.collection("reviews");
-    const cardAddedProducts = db.collection("card");
+    const cartProducts = db.collection("cart");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -134,18 +134,18 @@ async function run() {
     });
 
     //add product in card
-    app.put("/add-product-in-card", async (req, res) => {
+    app.put("/add-product-in-cart", async (req, res) => {
       const product_info = req.body;
       // console.log(product_info.order_owner_info.email);
-      
+
       const query = {
         id: product_info.id,
         "order_owner_info.email": product_info.order_owner_info.email,
       };
 
-      const isExist = await cardAddedProducts.findOne(query);
+      const isExist = await cartProducts.findOne(query);
       if (isExist) {
-        const result = await cardAddedProducts.updateOne(query, {
+        const result = await cartProducts.updateOne(query, {
           $set: { quantity: product_info.quantity },
         });
 
@@ -156,7 +156,7 @@ async function run() {
       const updateDoc = {
         $set: { ...product_info, timestamp: Date.now() },
       };
-      const result = await cardAddedProducts.updateOne(
+      const result = await cartProducts.updateOne(
         query,
         updateDoc,
         options
@@ -165,11 +165,23 @@ async function run() {
     });
 
     //get active user card product
-    app.get("/products-in-card/:email", async (req, res) => {
+    app.get("/products-in-cart/:email", async (req, res) => {
       const { email } = req.params;
       const query = { "order_owner_info.email": email };
-      const result = await cardAddedProducts.find(query).toArray();
+      const result = await cartProducts.find(query).toArray();
       res.send(result);
+    });
+
+    //delete-product-in-cart
+    app.delete("/delete-product-in-cart", async (req, res) => {
+      const product_info = req.body;
+      const filter = {
+        id: product_info.id,
+        "order_owner_info.email": product_info.order_owner_info.email,
+      };
+      // console.log(filter);
+      const result = await cartProducts.deleteOne(filter)
+      res.send(result)
     });
 
     // Send a ping to confirm a successful connection
