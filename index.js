@@ -74,6 +74,12 @@ async function run() {
         .send({ success: true });
     });
 
+    //ger all user
+    app.get("/users", async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      return res.send(result);
+    });
+
     //save a user data in db
     app.put("/user", async (req, res) => {
       const user = req.body;
@@ -146,7 +152,7 @@ async function run() {
       const isExist = await cartProducts.findOne(query);
       if (isExist) {
         const result = await cartProducts.updateOne(query, {
-          $set: { quantity: product_info.quantity },
+          $set: { quantity: product_info.quantity, timestamp: Date.now() },
         });
 
         return res.send(result);
@@ -156,11 +162,7 @@ async function run() {
       const updateDoc = {
         $set: { ...product_info, timestamp: Date.now() },
       };
-      const result = await cartProducts.updateOne(
-        query,
-        updateDoc,
-        options
-      );
+      const result = await cartProducts.updateOne(query, updateDoc, options);
       res.send(result);
     });
 
@@ -180,8 +182,8 @@ async function run() {
         "order_owner_info.email": product_info.order_owner_info.email,
       };
       // console.log(filter);
-      const result = await cartProducts.deleteOne(filter)
-      res.send(result)
+      const result = await cartProducts.deleteOne(filter);
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
