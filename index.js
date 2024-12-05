@@ -74,9 +74,18 @@ async function run() {
         .send({ success: true });
     });
 
-    //ger all user
+    //get all user
     app.get("/users", async (req, res) => {
       const result = await usersCollection.find().toArray();
+      return res.send(result);
+    });
+
+    //get specific user
+    app.get("/user/:email", async (req, res) => {
+      const { email } = req.params;
+      // console.log(email);
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
       return res.send(result);
     });
 
