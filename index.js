@@ -148,6 +148,12 @@ async function run() {
       res.send(result);
     });
 
+    //get all reviews
+    app.get("/reviews", async (req, res) => {
+      const result = await reviewsCollection.find().toArray();
+      res.send(result);
+    });
+
     //add product in card
     app.put("/add-product-in-cart", async (req, res) => {
       const product_info = req.body;
