@@ -119,6 +119,30 @@ async function run() {
       res.send(result);
     });
 
+    //update user data in db
+    app.patch("/user/:id", async (req, res) => {
+      const id = req.params.id;
+      const { name, phone_number, address } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      // console.log(req.body);
+
+      const updateDoc = {
+        // $set: {
+        //   ...(req.body.name && { name: req.body.name }),
+        //   ...(req.body.phone_number && { number: req.body.phone_number }),
+        //   ...(req.body.address && { address: req.body.address }),
+        // },
+        
+        $set: {
+          ...(name && { name }),
+          ...(phone_number && { number: phone_number }),
+          ...(address && { address }),
+        },
+      };
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
     //all products
     app.get("/products", async (req, res) => {
       const result = await productsCollection.find().toArray();
