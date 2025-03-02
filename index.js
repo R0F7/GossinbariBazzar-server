@@ -50,6 +50,7 @@ async function run() {
     const productsCollection = db.collection("products");
     const reviewsCollection = db.collection("reviews");
     const cartProducts = db.collection("cart");
+    const wishlistProduct = db.collection("wishlist");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -132,7 +133,7 @@ async function run() {
         //   ...(req.body.phone_number && { number: req.body.phone_number }),
         //   ...(req.body.address && { address: req.body.address }),
         // },
-        
+
         $set: {
           ...(name && { name }),
           ...(phone_number && { number: phone_number }),
@@ -145,7 +146,16 @@ async function run() {
 
     //all products
     app.get("/products", async (req, res) => {
-      const result = await productsCollection.find().toArray();
+      const { category, price, sub_category, tag } = req.query;
+      console.log(category, price, sub_category, tag);
+
+      let filters = {};
+      if (category) filters.category = category;
+      if (price > 0) filters.price = { $lt: Number(price) };
+      if (sub_category) filters.sub_category = sub_category;
+      if (tag) filters.tags = { $in: [tag] };
+
+      const result = await productsCollection.find(filters).toArray();
       res.send(result);
     });
 
@@ -222,6 +232,15 @@ async function run() {
       };
       // console.log(filter);
       const result = await cartProducts.deleteOne(filter);
+      res.send(result);
+    });
+
+    // add product in wishlist
+    app.post("/add-product-wishlist", async (req, res) => {
+      const product_info = req.body;
+      // console.log(product_info);
+
+      const result = await wishlistProduct.insertOne(product_info);
       res.send(result);
     });
 
