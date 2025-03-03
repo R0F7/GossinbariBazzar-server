@@ -238,9 +238,43 @@ async function run() {
     // add product in wishlist
     app.post("/add-product-wishlist", async (req, res) => {
       const product_info = req.body;
-      // console.log(product_info);
+      const filter = { id: product_info.id, email: product_info.email };
+
+      const wishlist = await wishlistProduct.find(filter).toArray();
+      if (wishlist && wishlist.length > 0) {
+        return;
+      }
 
       const result = await wishlistProduct.insertOne(product_info);
+      res.send(result);
+    });
+
+    // get product in wishlist
+    app.get("/wishlist/:email", async (req, res) => {
+      const { email } = req.params;
+
+      const allProducts = await productsCollection.find().toArray();
+      const wishlistProducts = await wishlistProduct
+        .find({ email: email })
+        .toArray();
+
+      // Filter products that exist in the wishlist
+      const filteredProducts = allProducts.filter((product) =>
+        wishlistProducts.some(
+          (wishlistItem) =>
+            product._id.toString() === wishlistItem.id.toString()
+        )
+      );
+
+      res.send(filteredProducts);
+    });
+
+    app.delete("/wishlist", async (req, res) => {
+      const info = req.body;
+      const query = { id: info.id, email: info.email };
+      console.log(query);
+      const result = await wishlistProduct.deleteOne(query);
+      console.log(result);
       res.send(result);
     });
 
