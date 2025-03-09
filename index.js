@@ -5,6 +5,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const port = process.env.PORT || 7777;
 
@@ -73,6 +74,26 @@ async function run() {
       res
         .clearCookie("token", { ...cookieOption, maxAge: 0 })
         .send({ success: true });
+    });
+
+    // payment route
+    app.post("/create-payment-intent", async (req, res) => {
+      const { total_price } = req.body;
+      const total_price_in_cent = parseFloat(total_price) * 100;
+      console.log(total_price);
+
+      if (!total_price || total_price_in_cent < 1) return;
+
+      // Create a PaymentIntent with the order amount and currency
+      const { client_secret } = await stripe.paymentIntents.create({
+        amount: total_price_in_cent,
+        currency: "usd",
+        automatic_payment_methods: {
+          enabled: true,
+        },
+      });
+
+      res.send({ clientSecret: client_secret });
     });
 
     //get all user
@@ -147,7 +168,7 @@ async function run() {
     //all products
     app.get("/products", async (req, res) => {
       const { category, price, sub_category, tag } = req.query;
-      console.log(category, price, sub_category, tag);
+      // console.log(category, price, sub_category, tag);
 
       let filters = {};
       if (category) filters.category = category;
@@ -272,9 +293,9 @@ async function run() {
     app.delete("/wishlist", async (req, res) => {
       const info = req.body;
       const query = { id: info.id, email: info.email };
-      console.log(query);
+      // console.log(query);
       const result = await wishlistProduct.deleteOne(query);
-      console.log(result);
+      // console.log(result);
       res.send(result);
     });
 
