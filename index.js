@@ -52,6 +52,7 @@ async function run() {
     const reviewsCollection = db.collection("reviews");
     const cartProducts = db.collection("cart");
     const wishlistProduct = db.collection("wishlist");
+    const orderCollection = db.collection("order");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -80,7 +81,6 @@ async function run() {
     app.post("/create-payment-intent", async (req, res) => {
       const { total_price } = req.body;
       const total_price_in_cent = parseFloat(total_price) * 100;
-      console.log(total_price);
 
       if (!total_price || total_price_in_cent < 1) return;
 
@@ -297,6 +297,52 @@ async function run() {
       const result = await wishlistProduct.deleteOne(query);
       // console.log(result);
       res.send(result);
+    });
+
+    // place order in db & remove cart items
+    app.post("/order-info", async (req, res) => {
+      const data = req.body;
+      const { email } = data.order_owner_info;
+
+      if (
+        !data.products ||
+        !Array.isArray(data.products) ||
+        data.products.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({ message: "Invalid or empty product data" });
+      }
+
+      // Delete cart items
+      await cartProducts.deleteMany({ "order_owner_info.email": email });
+
+      // Update product stock
+      const bulkOperations = [];
+
+      for (const product of data.products) {
+        const productId = new ObjectId(product.id);
+        const quantity = parseInt(product.quantity);
+
+        if (isNaN(quantity) || quantity <= 0) {
+          return res
+            .status(400)
+            .json({ message: `Invalid quantity for product: ${product.id}` });
+        }
+
+        bulkOperations.push({
+          updateOne: {
+            filter: { _id: productId },
+            update: { $inc: { total_product: -quantity } },
+          },
+        });
+      }
+
+      if (bulkOperations.length > 0) await productsCollection.bulkWrite(bulkOperations);
+
+      // Insert the order
+      const orderResult = await orderCollection.insertOne(data);
+      res.send(orderResult);
     });
 
     // Send a ping to confirm a successful connection
