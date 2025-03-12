@@ -338,11 +338,19 @@ async function run() {
         });
       }
 
-      if (bulkOperations.length > 0) await productsCollection.bulkWrite(bulkOperations);
+      if (bulkOperations.length > 0)
+        await productsCollection.bulkWrite(bulkOperations);
 
       // Insert the order
       const orderResult = await orderCollection.insertOne(data);
       res.send(orderResult);
+    });
+
+    app.get("/order-data/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { "order_owner_info.email": email };
+      const result = await orderCollection.find(query).toArray();
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
