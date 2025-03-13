@@ -290,6 +290,7 @@ async function run() {
       res.send(filteredProducts);
     });
 
+    // delete wishlist data
     app.delete("/wishlist", async (req, res) => {
       const info = req.body;
       const query = { id: info.id, email: info.email };
@@ -299,7 +300,7 @@ async function run() {
       res.send(result);
     });
 
-    // place order in db & remove cart items
+    // place order & remove cart items & update card product quantity
     app.post("/order-info", async (req, res) => {
       const data = req.body;
       const { email } = data.order_owner_info;
@@ -349,8 +350,20 @@ async function run() {
     app.get("/order-data/:email", async (req, res) => {
       const { email } = req.params;
       const query = { "order_owner_info.email": email };
-      const result = await orderCollection.find(query).toArray();
+      const result = await orderCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
+    });
+
+    app.get("/order-details/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const orderData = await orderCollection.findOne({
+        _id: new ObjectId(id)
+      });
+      res.send(orderData.products);
     });
 
     // Send a ping to confirm a successful connection
