@@ -347,12 +347,28 @@ async function run() {
       res.send(orderResult);
     });
 
+    // get specific user order data 
     app.get("/order-data/:email", async (req, res) => {
       const { email } = req.params;
-      const query = { "order_owner_info.email": email };
+      const { startDate, endDate } = req.query;
+      let query = { "order_owner_info.email": email };
+
+      if (startDate !== "undefined" && endDate !== "undefined") {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        query = {
+          ...query,
+          createdAt: { $gte: start, $lte: end },
+        };
+      }
+
       const result = await orderCollection
-        .find(query)
-        .sort({ createdAt: -1 })
+        .aggregate([
+          { $addFields: { createdAt: { $toDate: "$createdAt" } } },
+          { $match: query },
+          { $sort: { createdAt: -1 } },
+        ])
         .toArray();
       res.send(result);
     });
@@ -361,9 +377,9 @@ async function run() {
       const { id } = req.params;
 
       const orderData = await orderCollection.findOne({
-        _id: new ObjectId(id)
+        _id: new ObjectId(id),
       });
-      res.send(orderData.products);
+      res.send(orderData);
     });
 
     // Send a ping to confirm a successful connection
