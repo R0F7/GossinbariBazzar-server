@@ -6,6 +6,9 @@ const cookieParser = require("cookie-parser");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { Server } = require("socket.io");
+const http = require("http");
+const server = http.createServer(app);
 
 const port = process.env.PORT || 7777;
 
@@ -21,6 +24,13 @@ const cookieOption = {
   sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
   secure: process.env.NODE_ENV === "production",
 };
+
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:5173", "http://localhost:5174"], // Frontend URL
+    methods: ["GET", "POST"],
+  },
+});
 
 //middleware
 app.use(cors(corsOptions));
@@ -53,6 +63,7 @@ async function run() {
     const cartProducts = db.collection("cart");
     const wishlistProduct = db.collection("wishlist");
     const orderCollection = db.collection("order");
+    const messagesCollection = db.collection("messages");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -347,13 +358,18 @@ async function run() {
       res.send(orderResult);
     });
 
-    // get specific user order data 
+    // get specific user order data
     app.get("/order-data/:email", async (req, res) => {
       const { email } = req.params;
       const { startDate, endDate } = req.query;
       let query = { "order_owner_info.email": email };
 
-      if (startDate !== "undefined" && endDate !== "undefined") {
+      if (
+        startDate &&
+        endDate &&
+        startDate !== "undefined" &&
+        endDate !== "undefined"
+      ) {
         const start = new Date(startDate);
         const end = new Date(endDate);
 
@@ -382,6 +398,45 @@ async function run() {
       res.send(orderData);
     });
 
+    // live chat 
+    io.on("connection", (socket) => {
+      console.log("User connected:", socket.id);
+    
+      // User joins chat room
+      socket.on("joinChat", (email) => {
+        socket.join(email);
+        // console.log(`${email} joined chat room`);
+      });
+    
+      // Load previous messages when user joins
+      socket.on("loadMessages", async (email) => {
+        const chatHistory = await messagesCollection.find({ email }).toArray();
+        socket.emit("previousMessages", chatHistory);
+      });
+    
+      // Handle new message
+      socket.on("sendMessage", async (data) => {
+        const { email, userType, text } = data;
+        const newMessage = {
+          email,
+          userType,
+          text,
+          timestamp: new Date(),
+        };
+    
+        // Save message to DB
+        await messagesCollection.insertOne(newMessage);
+    
+        // Emit message to the corresponding user
+        io.to(email).emit("receiveMessage", newMessage);
+      });
+    
+      // User disconnect
+      socket.on("disconnect", () => {
+        // console.log("User disconnected:", socket.id);
+      });
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
@@ -397,6 +452,10 @@ app.get("/", (req, res) => {
   res.send("GossainbariBazzer server is running");
 });
 
-app.listen(port, () => {
+// app.listen(port, () => {
+//   console.log(`GossainbariBazzer listening on port: ${port} `);
+// });
+
+server.listen(port, () => {
   console.log(`GossainbariBazzer listening on port: ${port} `);
 });
