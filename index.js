@@ -9,6 +9,8 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { Server } = require("socket.io");
 const http = require("http");
 const server = http.createServer(app);
+const admin = require("firebase-admin");
+admin.initializeApp();
 
 const port = process.env.PORT || 7777;
 
@@ -27,7 +29,7 @@ const cookieOption = {
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5174"], // Frontend URL
+    origin: ["http://localhost:5173", "http://localhost:5174"],
     methods: ["GET", "POST"],
   },
 });
@@ -38,9 +40,24 @@ app.use(express.json());
 app.use(cookieParser());
 
 //verify Token middleware
-// const verifyToken = async (req, res, next) => {
-//   const token = req.cookie?.token;
-// };
+const verifyToken = async (req, res, next) => {
+  // console.log("Cookies received:", req.cookies);
+
+  const token = req.cookies?.token;
+  // console.log(token);
+
+  if (!token) {
+    return res.status(401).json({ message: "unauthorized access" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+};
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.wezoknx.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -64,6 +81,7 @@ async function run() {
     const wishlistProduct = db.collection("wishlist");
     const orderCollection = db.collection("order");
     const messagesCollection = db.collection("messages");
+    const notifications = db.collection("notifications");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -282,7 +300,7 @@ async function run() {
     });
 
     // get product in wishlist
-    app.get("/wishlist/:email", async (req, res) => {
+    app.get("/wishlist/:email", verifyToken, async (req, res) => {
       const { email } = req.params;
 
       const allProducts = await productsCollection.find().toArray();
@@ -302,7 +320,7 @@ async function run() {
     });
 
     // delete wishlist data
-    app.delete("/wishlist", async (req, res) => {
+    app.delete("/wishlist",verifyToken, async (req, res) => {
       const info = req.body;
       const query = { id: info.id, email: info.email };
       // console.log(query);
@@ -398,22 +416,22 @@ async function run() {
       res.send(orderData);
     });
 
-    // live chat 
+    // live chat
     io.on("connection", (socket) => {
-      console.log("User connected:", socket.id);
-    
+      // console.log("User connected:", socket.id);
+
       // User joins chat room
       socket.on("joinChat", (email) => {
         socket.join(email);
         // console.log(`${email} joined chat room`);
       });
-    
+
       // Load previous messages when user joins
       socket.on("loadMessages", async (email) => {
         const chatHistory = await messagesCollection.find({ email }).toArray();
         socket.emit("previousMessages", chatHistory);
       });
-    
+
       // Handle new message
       socket.on("sendMessage", async (data) => {
         const { email, userType, text } = data;
@@ -423,18 +441,38 @@ async function run() {
           text,
           timestamp: new Date(),
         };
-    
+
         // Save message to DB
         await messagesCollection.insertOne(newMessage);
-    
+
         // Emit message to the corresponding user
         io.to(email).emit("receiveMessage", newMessage);
       });
-    
+
       // User disconnect
       socket.on("disconnect", () => {
         // console.log("User disconnected:", socket.id);
       });
+    });
+
+    // //live chat (firebase)
+    // const setAdminRole = async (uid) => {
+    //   await admin.auth().setCustomUserClaims(uid, { admin: true });
+    //   console.log("Admin role assigned to user");
+    // };
+
+    // get notifications
+    app.get("/notifications/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await notifications.find({ email: email }).toArray();
+      res.send(result);
+    });
+
+    // post notifications
+    app.post("/notification", async (req, res) => {
+      const data = req.body;
+      const result = await notifications.insertOne(data);
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
