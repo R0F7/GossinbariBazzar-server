@@ -209,6 +209,26 @@ async function run() {
       res.send(result);
     });
 
+    // post and update product
+    app.put("/product", async (req, res) => {
+      const product_info = req.body;
+      const query = { _id: new ObjectId(product_info._id) };
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: {
+          ...product_info,
+          timestamp: Date.now(),
+        },
+      };
+
+      const result = await productsCollection.updateOne(
+        query,
+        updateDoc,
+        options
+      );
+      res.send(result);
+    });
+
     //single product
     app.get("/product/:id", async (req, res) => {
       const { id } = req.params;
@@ -320,7 +340,7 @@ async function run() {
     });
 
     // delete wishlist data
-    app.delete("/wishlist",verifyToken, async (req, res) => {
+    app.delete("/wishlist", verifyToken, async (req, res) => {
       const info = req.body;
       const query = { id: info.id, email: info.email };
       // console.log(query);
