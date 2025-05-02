@@ -212,7 +212,19 @@ async function run() {
     // post and update product
     app.put("/product", async (req, res) => {
       const product_info = req.body;
-      const query = { _id: new ObjectId(product_info._id) };
+      const { _id, ...updateData } = product_info;
+      
+      const query = { _id: new ObjectId(_id) };
+
+      const isExist = await productsCollection.findOne(query);
+      if (isExist) {
+        const result = await productsCollection.updateOne(query, {
+          $set: { ...updateData, timestamp: Date.now() },
+        });
+
+        return res.send(result);
+      }
+
       const options = { upsert: true };
       const updateDoc = {
         $set: {
@@ -234,6 +246,15 @@ async function run() {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };
       const result = await productsCollection.findOne(query);
+      res.send(result);
+    });
+
+    // get vendor product
+    app.get("/vendor-products/:email", async (req, res) => {
+      const { email } = req.params;
+      // console.log(email);
+      const query = { "vendor_info.email": email };
+      const result = await productsCollection.find(query).toArray();
       res.send(result);
     });
 
