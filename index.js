@@ -213,7 +213,7 @@ async function run() {
     app.put("/product", async (req, res) => {
       const product_info = req.body;
       const { _id, ...updateData } = product_info;
-      
+
       const query = { _id: new ObjectId(_id) };
 
       const isExist = await productsCollection.findOne(query);
@@ -455,6 +455,98 @@ async function run() {
         _id: new ObjectId(id),
       });
       res.send(orderData);
+    });
+
+    // // get ordered data for specific vendor
+    // app.get("/orders-receive/:email", async (req, res) => {
+    //   const { email } = req.params;
+    //   const orders = await orderCollection
+    //     .find({
+    //       products: {
+    //         $elemMatch: {
+    //           "vendor_info.email": email,
+    //         },
+    //       },
+    //     })
+    //     .toArray();
+    //   res.send(orders);
+    // });
+
+    app.get("/orders-receive/:email", async (req, res) => {
+      const { email } = req.params;
+
+      try {
+        const orders = await orderCollection
+          .aggregate([
+            {
+              $match: {
+                "products.vendor_info.email": email,
+              },
+            },
+            {
+              $project: {
+                orderID: 1,
+                shippingDetails: 1,
+                paymentInfo: 1,
+                order_owner_info: 1,
+                total_price: 1,
+                total_quantity: 1,
+                status: 1,
+                createdAt: 1,
+                delivery: 1,
+                vendor_status:1,
+                
+                // Filter only the products for this vendor
+                products: {
+                  $filter: {
+                    input: "$products",
+                    as: "product",
+                    cond: {
+                      $eq: ["$$product.vendor_info.email", email],
+                    },
+                  },
+                },
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(orders);
+      } catch (err) {
+        res.status(500).send({ error: "Server Error", details: err.message });
+      }
+    });
+
+    // order_update_vendor_status
+    app.patch("/order_update_vendor_status/:id", async (req, res) => {
+      const { id } = req.params;
+      const { vendor_status } = req.body;
+
+      if (!vendor_status?.email || !vendor_status?.status) {
+        return res.status(400).json({ message: "Invalid vendor status data." });
+      }
+
+      try {
+        const updated = await orderCollection.updateOne(
+          { _id: new ObjectId(id), "vendor_status.email": vendor_status.email },
+          { $set: { "vendor_status.$.status": vendor_status.status } }
+        );
+
+        if (updated.modifiedCount === 0) {
+          console.log("Pushing new vendor_status...");
+          await orderCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $push: { vendor_status: vendor_status } }
+          );
+        }
+
+        res.json({ message: "Vendor status updated successfully" });
+      } catch (error) {
+        console.error("Update error:", error);
+        res
+          .status(500)
+          .json({ message: "Update failed", error: error.message });
+      }
     });
 
     // live chat
