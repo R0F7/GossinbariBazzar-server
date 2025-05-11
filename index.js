@@ -472,17 +472,47 @@ async function run() {
     //   res.send(orders);
     // });
 
+    // order receive for vendor by email
     app.get("/orders-receive/:email", async (req, res) => {
       const { email } = req.params;
+      const { startDate, endDate, search } = req.query;
+
+      const query = {
+        "products.vendor_info.email": email,
+      };
+
+      if (
+        startDate &&
+        endDate &&
+        startDate !== "undefined" &&
+        endDate !== "undefined"
+      ) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        query.createdAt = { $gte: start, $lte: end };
+      }
+
+      if (search && search !== "null") {
+        const searchRegex = new RegExp(search, "i");
+        query.$or = [
+          { orderID: searchRegex },
+          { "shippingDetails.trackingNumber": searchRegex },
+        ];
+      }
 
       try {
         const orders = await orderCollection
           .aggregate([
-            {
-              $match: {
-                "products.vendor_info.email": email,
-              },
-            },
+            // Convert createdAt to Date object
+            { $addFields: { createdAt: { $toDate: "$createdAt" } } },
+
+            // Match vendor email and optional date range
+            { $match: query },
+
+            // Sort by latest order first
+            { $sort: { createdAt: -1 } },
+
+            // Project only needed fields and filter products by vendor
             {
               $project: {
                 orderID: 1,
@@ -494,9 +524,7 @@ async function run() {
                 status: 1,
                 createdAt: 1,
                 delivery: 1,
-                vendor_status:1,
-                
-                // Filter only the products for this vendor
+                vendor_status: 1,
                 products: {
                   $filter: {
                     input: "$products",
@@ -526,10 +554,19 @@ async function run() {
         return res.status(400).json({ message: "Invalid vendor status data." });
       }
 
+      // Add/update the createdAt timestamp
+      const currentTimestamp = new Date();
+      vendor_status.createdAt = currentTimestamp;
+
       try {
         const updated = await orderCollection.updateOne(
           { _id: new ObjectId(id), "vendor_status.email": vendor_status.email },
-          { $set: { "vendor_status.$.status": vendor_status.status } }
+          {
+            $set: {
+              "vendor_status.$.status": vendor_status.status,
+              "vendor_status.$.createdAt": currentTimestamp,
+            },
+          }
         );
 
         if (updated.modifiedCount === 0) {
@@ -547,6 +584,20 @@ async function run() {
           .status(500)
           .json({ message: "Update failed", error: error.message });
       }
+    });
+
+    // order shipping status update
+    app.patch("/shipping-status-update/:id", async (req, res) => {
+      const { id } = req.params;
+      const { newStatus } = req.body;
+
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { "shippingDetails.status": newStatus },
+      };
+
+      const updated = await orderCollection.updateOne(query, updateDoc);
+      res.send(updated);
     });
 
     // live chat
