@@ -497,6 +497,7 @@ async function run() {
         query.$or = [
           { orderID: searchRegex },
           { "shippingDetails.trackingNumber": searchRegex },
+          { returns: { $elemMatch: { requestID: searchRegex } } }
         ];
       }
 
@@ -525,6 +526,7 @@ async function run() {
                 createdAt: 1,
                 delivery: 1,
                 vendor_status: 1,
+                returns: 1,
                 products: {
                   $filter: {
                     input: "$products",
@@ -598,6 +600,46 @@ async function run() {
 
       const updated = await orderCollection.updateOne(query, updateDoc);
       res.send(updated);
+    });
+
+    //return_order_info
+    app.patch("/return-order-info/:id", async (req, res) => {
+      const { id } = req.params;
+      const { email } = req.query;
+      const { returns } = req.body;
+
+      if (!returns || !email || !id) {
+        return res.status(400).json({ message: "Invalid or missing data." });
+      }
+
+      const query = { orderID: id, "order_owner_info.email": email };
+
+      const currentTimestamp = new Date();
+      returns.requestedOn = currentTimestamp;
+
+      try {
+        const result = await orderCollection.updateOne(query, {
+          $push: { returns: returns },
+        });
+        res.send(result);
+      } catch (error) {
+        console.error("Update error:", error);
+        res
+          .status(500)
+          .json({ message: "Update failed", error: error.message });
+      }
+    });
+
+    //return order status update
+    app.patch("/update-return-status/:requestID/:orderID", async (req, res) => {
+      const { requestID, orderID } = req.params;
+      const { newStatus } = req.body;
+
+      const result = await orderCollection.updateOne(
+        { orderID, "returns.requestID": requestID },
+        { $set: { "returns.$.status": newStatus } }
+      );
+      res.send(result);
     });
 
     // live chat
