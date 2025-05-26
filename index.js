@@ -82,6 +82,7 @@ async function run() {
     const orderCollection = db.collection("order");
     const messagesCollection = db.collection("messages");
     const notifications = db.collection("notifications");
+    const payoutCollection = db.collection("payout");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -479,6 +480,7 @@ async function run() {
 
       const query = {
         "products.vendor_info.email": email,
+        // status: "Delivered",
       };
 
       if (
@@ -497,7 +499,7 @@ async function run() {
         query.$or = [
           { orderID: searchRegex },
           { "shippingDetails.trackingNumber": searchRegex },
-          { returns: { $elemMatch: { requestID: searchRegex } } }
+          { returns: { $elemMatch: { requestID: searchRegex } } },
         ];
       }
 
@@ -526,6 +528,7 @@ async function run() {
                 createdAt: 1,
                 delivery: 1,
                 vendor_status: 1,
+                discounted_price: 1,
                 returns: 1,
                 products: {
                   $filter: {
@@ -640,6 +643,105 @@ async function run() {
         { $set: { "returns.$.status": newStatus } }
       );
       res.send(result);
+    });
+
+    // get payout
+    app.get("/payout/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await payoutCollection
+        .find({ vendorEmail: email })
+        .toArray();
+      res.send(result);
+    });
+
+    // calculate revenue current to last month
+    app.get("/revenue/:email", async (req, res) => {
+      const { email } = req.params;
+      const currentDate = new Date();
+
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
+
+      const lastMonthDate = new Date(currentDate);
+      lastMonthDate.setMonth(currentMonth - 1);
+
+      const startOfCurrentMonth = new Date(currentYear, currentMonth, 1);
+      const endOfCurrentMonth = new Date(currentYear, currentMonth + 1, 0);
+
+      const startOfLastMonth = new Date(
+        lastMonthDate.getFullYear(),
+        lastMonthDate.getMonth(),
+        1
+      );
+      const endOfLastMonth = new Date(
+        lastMonthDate.getFullYear(),
+        lastMonthDate.getMonth() + 1,
+        0
+      );
+
+      const calculateRevenue = async (start, end) => {
+        const result = await orderCollection
+          .aggregate([
+            { $addFields: { createdAt: { $toDate: "$createdAt" } } },
+            {
+              $match: {
+                "products.vendor_info.email": email,
+                // status: "Delivered",
+                createdAt: { $gte: start, $lte: end },
+              },
+            },
+            { $unwind: "$products" },
+            {
+              $match: {
+                "products.vendor_info.email": email,
+              },
+            },
+            {
+              $addFields: {
+                actualPrice: {
+                  $cond: [
+                    { $gt: ["$products.discounted_price", 0] },
+                    "$products.discounted_price",
+                    "$products.price",
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalRevenue: {
+                  $sum: {
+                    $multiply: ["$actualPrice", "$products.quantity"],
+                  },
+                },
+              },
+            },
+          ])
+          .toArray();
+
+        return result[0]?.totalRevenue || 0;
+      };
+
+      const currentRevenue = await calculateRevenue(
+        startOfCurrentMonth,
+        endOfCurrentMonth
+      );
+      const lastRevenue = await calculateRevenue(
+        startOfLastMonth,
+        endOfLastMonth
+      );
+
+      const growthPercentage =
+        lastRevenue === 0
+          ? 100
+          : (((currentRevenue - lastRevenue) / lastRevenue) * 100).toFixed(2);
+
+      res.send({
+        currentRevenue,
+        lastRevenue,
+        growthPercentage,
+      });
     });
 
     // live chat
