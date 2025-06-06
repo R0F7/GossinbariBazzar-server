@@ -474,14 +474,120 @@ async function run() {
     // });
 
     // order receive for vendor by email
+    // app.get("/orders-receive/:email", async (req, res) => {
+    //   const { email } = req.params;
+    //   const { startDate, endDate, search, minPrice, maxPrice } = req.query;
+    //   console.log(minPrice, maxPrice);
+
+    //   const query = {
+    //     "products.vendor_info.email": email,
+    //     // status: "Delivered",
+    //   };
+
+    //   if (
+    //     startDate &&
+    //     endDate &&
+    //     startDate !== "undefined" &&
+    //     endDate !== "undefined"
+    //   ) {
+    //     const start = new Date(startDate);
+    //     const end = new Date(endDate);
+    //     query.createdAt = { $gte: start, $lte: end };
+    //   }
+
+    //   if (search && search !== "null") {
+    //     const searchRegex = new RegExp(search, "i");
+    //     query.$or = [
+    //       { orderID: searchRegex },
+    //       { "shippingDetails.trackingNumber": searchRegex },
+    //       { returns: { $elemMatch: { requestID: searchRegex } } },
+    //     ];
+    //   }
+
+    //   try {
+    //     const orders = await orderCollection
+    //       .aggregate([
+    //         // Convert createdAt to Date object
+    //         { $addFields: { createdAt: { $toDate: "$createdAt" } } },
+
+    //         // Match vendor email and optional date range
+    //         { $match: query },
+
+    //         // Sort by latest order first
+    //         { $sort: { createdAt: -1 } },
+
+    //         // Project only needed fields and filter products by vendor
+    //         {
+    //           $project: {
+    //             orderID: 1,
+    //             shippingDetails: 1,
+    //             paymentInfo: 1,
+    //             order_owner_info: 1,
+    //             total_price: 1,
+    //             total_quantity: 1,
+    //             status: 1,
+    //             createdAt: 1,
+    //             delivery: 1,
+    //             vendor_status: 1,
+    //             discounted_price: 1,
+    //             returns: 1,
+    //             products: {
+    //               $filter: {
+    //                 input: "$products",
+    //                 as: "product",
+    //                 cond: {
+    //                   $eq: ["$$product.vendor_info.email", email],
+    //                 },
+    //               },
+    //             },
+    //           },
+    //         },
+    //       ])
+    //       .toArray();
+
+    //     res.send(orders);
+    //   } catch (err) {
+    //     res.status(500).send({ error: "Server Error", details: err.message });
+    //   }
+    // });
+
     app.get("/orders-receive/:email", async (req, res) => {
       const { email } = req.params;
-      const { startDate, endDate, search } = req.query;
+      const {
+        startDate,
+        endDate,
+        search,
+        minPrice,
+        maxPrice,
+        category,
+        revenueCalculation,
+      } = req.query;
 
       const query = {
         "products.vendor_info.email": email,
         // status: "Delivered",
       };
+
+      // if (
+      //   typeof minPrice !== "undefined" &&
+      //   typeof maxPrice !== "undefined" &&
+      //   !isNaN(minPrice) &&
+      //   !isNaN(maxPrice)
+      // ) {
+      //   query.products = {
+      //     $elemMatch: {
+      //       price: {
+      //         $gte: Number(minPrice),
+      //         $lte: Number(maxPrice),
+      //       },
+      //       "vendor_info.email": email,
+      //     },
+      //   };
+      // }
+
+      if (revenueCalculation) {
+        query.status = "Delivered";
+      }
 
       if (
         startDate &&
@@ -492,6 +598,10 @@ async function run() {
         const start = new Date(startDate);
         const end = new Date(endDate);
         query.createdAt = { $gte: start, $lte: end };
+      }
+
+      if (category && category !== "undefined") {
+        query["products.category"] = category;
       }
 
       if (search && search !== "null") {
@@ -506,16 +616,9 @@ async function run() {
       try {
         const orders = await orderCollection
           .aggregate([
-            // Convert createdAt to Date object
             { $addFields: { createdAt: { $toDate: "$createdAt" } } },
-
-            // Match vendor email and optional date range
             { $match: query },
-
-            // Sort by latest order first
             { $sort: { createdAt: -1 } },
-
-            // Project only needed fields and filter products by vendor
             {
               $project: {
                 orderID: 1,
@@ -535,7 +638,20 @@ async function run() {
                     input: "$products",
                     as: "product",
                     cond: {
-                      $eq: ["$$product.vendor_info.email", email],
+                      $and: [
+                        { $eq: ["$$product.vendor_info.email", email] },
+                        ...(minPrice !== undefined &&
+                        maxPrice !== undefined &&
+                        maxPrice !== "0"
+                          ? [
+                              { $gte: ["$$product.price", Number(minPrice)] },
+                              { $lte: ["$$product.price", Number(maxPrice)] },
+                            ]
+                          : []),
+                        ...(category
+                          ? [{ $eq: ["$$product.category", category] }]
+                          : []),
+                      ],
                     },
                   },
                 },
@@ -645,6 +761,18 @@ async function run() {
       res.send(result);
     });
 
+    // order status update
+    app.patch("/order-status-update/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+      console.log(id, status);
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: status } };
+
+      const result = await orderCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
     // get payout
     app.get("/payout/:email", async (req, res) => {
       const { email } = req.params;
@@ -686,7 +814,7 @@ async function run() {
             {
               $match: {
                 "products.vendor_info.email": email,
-                // status: "Delivered",
+                status: "Delivered",
                 createdAt: { $gte: start, $lte: end },
               },
             },
