@@ -197,16 +197,41 @@ async function run() {
 
     //all products
     app.get("/products", async (req, res) => {
-      const { category, price, sub_category, tag } = req.query;
+      const { category, price, sub_category, tag, searchText, sortOption } =
+        req.query;
       // console.log(category, price, sub_category, tag);
 
       let filters = {};
+      let sort = {};
+
       if (category) filters.category = category;
       if (price > 0) filters.price = { $lt: Number(price) };
       if (sub_category) filters.sub_category = sub_category;
       if (tag) filters.tags = { $in: [tag] };
+      if (searchText && searchText.trim() !== "") {
+        filters.title = { $regex: new RegExp(searchText, "i") };
+      }
 
-      const result = await productsCollection.find(filters).toArray();
+      if (sortOption) {
+        if (sortOption === "default") {
+          sort.createdAt = -1;
+        } else if (sortOption === "latest") {
+          sort.createdAt = -1;
+        } else if (sortOption === "low-to-high") {
+          sort.price = 1;
+        } else if (sortOption === "high-to-low") {
+          sort.price = -1;
+        } else if (sortOption === "rating") {
+          sort.rating = -1;
+        } else if (sortOption === "popularity") {
+          sort.sold_product = -1;
+        }
+      }
+
+      const result = await productsCollection
+        .find(filters)
+        .sort(sort)
+        .toArray();
       res.send(result);
     });
 
@@ -565,25 +590,7 @@ async function run() {
 
       const query = {
         "products.vendor_info.email": email,
-        // status: "Delivered",
       };
-
-      // if (
-      //   typeof minPrice !== "undefined" &&
-      //   typeof maxPrice !== "undefined" &&
-      //   !isNaN(minPrice) &&
-      //   !isNaN(maxPrice)
-      // ) {
-      //   query.products = {
-      //     $elemMatch: {
-      //       price: {
-      //         $gte: Number(minPrice),
-      //         $lte: Number(maxPrice),
-      //       },
-      //       "vendor_info.email": email,
-      //     },
-      //   };
-      // }
 
       if (revenueCalculation) {
         query.status = "Delivered";
@@ -765,7 +772,6 @@ async function run() {
     app.patch("/order-status-update/:id", async (req, res) => {
       const { id } = req.params;
       const { status } = req.body;
-      console.log(id, status);
       const query = { _id: new ObjectId(id) };
       const updateDoc = { $set: { status: status } };
 
