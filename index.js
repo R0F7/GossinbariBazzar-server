@@ -10,9 +10,8 @@ const { Server } = require("socket.io");
 const http = require("http");
 const server = http.createServer(app);
 const admin = require("firebase-admin");
-admin.initializeApp();
-
 const port = process.env.PORT || 7777;
+// admin.initializeApp();
 
 const corsOptions = {
   origin: ["http://localhost:5173", "http://localhost:5174"],
@@ -26,6 +25,14 @@ const cookieOption = {
   sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
   secure: process.env.NODE_ENV === "production",
 };
+
+admin.initializeApp({
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  }),
+});
 
 const io = new Server(server, {
   cors: {
@@ -195,28 +202,68 @@ async function run() {
       res.send(result);
     });
 
+    // DELETE user by email
+    app.delete("/delete-user-by-email/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        // First, get the user's UID by email
+        const userRecord = await admin.auth().getUserByEmail(email);
+        const uid = userRecord.uid;
+
+        // Then delete the user by UID
+        await admin.auth().deleteUser(uid);
+        await usersCollection.deleteOne({ email: email });
+
+        res
+          .status(200)
+          .json({ message: `User with email ${email} deleted successfully.` });
+      } catch (error) {
+        console.error("Error deleting user:", error.message);
+        res
+          .status(500)
+          .json({ error: "Failed to delete user. " + error.message });
+      }
+    });
+
     //all products
     app.get("/products", async (req, res) => {
-      const { category, price, sub_category, tag, searchText, sortOption } =
-        req.query;
+      const {
+        category,
+        minPrice,
+        maxPrice,
+        sub_category,
+        tag,
+        searchText,
+        sortOption,
+      } = req.query;
       // console.log(category, price, sub_category, tag);
+      console.log(minPrice, maxPrice);
 
       let filters = {};
       let sort = {};
 
       if (category) filters.category = category;
-      if (price > 0) filters.price = { $lt: Number(price) };
       if (sub_category) filters.sub_category = sub_category;
       if (tag) filters.tags = { $in: [tag] };
       if (searchText && searchText.trim() !== "") {
         filters.title = { $regex: new RegExp(searchText, "i") };
       }
 
+      if (
+        minPrice !== undefined &&
+        maxPrice !== undefined &&
+        maxPrice !== "0"
+      ) {
+        console.log("fuck");
+        filters.price = { $gte: Number(minPrice), $lte: Number(maxPrice) };
+      }
+
       if (sortOption) {
         if (sortOption === "default") {
-          sort.createdAt = -1;
+          sort.timestamp = 1;
         } else if (sortOption === "latest") {
-          sort.createdAt = -1;
+          sort.timestamp = -1;
         } else if (sortOption === "low-to-high") {
           sort.price = 1;
         } else if (sortOption === "high-to-low") {
@@ -671,6 +718,11 @@ async function run() {
       } catch (err) {
         res.status(500).send({ error: "Server Error", details: err.message });
       }
+    });
+
+    app.get("/order-for-admin", async (req, res) => {
+      const result = await orderCollection.find().toArray();
+      res.send(result);
     });
 
     // order_update_vendor_status
