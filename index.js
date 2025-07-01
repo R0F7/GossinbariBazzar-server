@@ -90,6 +90,7 @@ async function run() {
     const messagesCollection = db.collection("messages");
     const notifications = db.collection("notifications");
     const payoutCollection = db.collection("payout");
+    const categoryCollection = db.collection("categories");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -135,7 +136,14 @@ async function run() {
 
     //get all user
     app.get("/users", async (req, res) => {
-      const result = await usersCollection.find().toArray();
+      const { role } = req.query;
+      console.log(role);
+
+      const query = {};
+
+      if (role) query.role = role;
+
+      const result = await usersCollection.find(query).toArray();
       return res.send(result);
     });
 
@@ -181,9 +189,10 @@ async function run() {
     //update user data in db
     app.patch("/user/:id", async (req, res) => {
       const id = req.params.id;
-      const { name, phone_number, address } = req.body;
+      const { name, phone_number, address, action, vendor_info } = req.body;
       const filter = { _id: new ObjectId(id) };
-      // console.log(req.body);
+      const status = vendor_info.status;
+      delete vendor_info.status;
 
       const updateDoc = {
         // $set: {
@@ -196,8 +205,28 @@ async function run() {
           ...(name && { name }),
           ...(phone_number && { number: phone_number }),
           ...(address && { address }),
+          ...(action && { action }),
+          ...(vendor_info && { vendor_info, status }),
         },
       };
+
+      const result = await usersCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
+
+    app.patch("/user-role/:email", async (req, res) => {
+      const { email } = req.params;
+      const { role, status } = req.body;
+      console.log(role, status);
+
+      const filter = { email: email };
+      const updateDoc = {
+        $set: {
+          ...(role && { role }),
+          ...(status && { status }),
+        },
+      };
+
       const result = await usersCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
@@ -236,9 +265,11 @@ async function run() {
         tag,
         searchText,
         sortOption,
+        status,
       } = req.query;
       // console.log(category, price, sub_category, tag);
-      console.log(minPrice, maxPrice);
+      // console.log(minPrice, maxPrice);
+      console.log(status);
 
       let filters = {};
       let sort = {};
@@ -246,6 +277,7 @@ async function run() {
       if (category) filters.category = category;
       if (sub_category) filters.sub_category = sub_category;
       if (tag) filters.tags = { $in: [tag] };
+      if (status) filters.status = status;
       if (searchText && searchText.trim() !== "") {
         filters.title = { $regex: new RegExp(searchText, "i") };
       }
@@ -255,7 +287,6 @@ async function run() {
         maxPrice !== undefined &&
         maxPrice !== "0"
       ) {
-        console.log("fuck");
         filters.price = { $gte: Number(minPrice), $lte: Number(maxPrice) };
       }
 
@@ -292,7 +323,7 @@ async function run() {
       const isExist = await productsCollection.findOne(query);
       if (isExist) {
         const result = await productsCollection.updateOne(query, {
-          $set: { ...updateData, timestamp: Date.now() },
+          $set: { ...updateData, updatedTime: Date.now() },
         });
 
         return res.send(result);
@@ -319,6 +350,13 @@ async function run() {
       const { id } = req.params;
       const query = { _id: new ObjectId(id) };
       const result = await productsCollection.findOne(query);
+      res.send(result);
+    });
+
+    app.delete("/product/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const result = await productsCollection.deleteOne(query);
       res.send(result);
     });
 
@@ -750,7 +788,7 @@ async function run() {
         );
 
         if (updated.modifiedCount === 0) {
-          console.log("Pushing new vendor_status...");
+          // console.log("Pushing new vendor_status...");
           await orderCollection.updateOne(
             { _id: new ObjectId(id) },
             { $push: { vendor_status: vendor_status } }
@@ -928,6 +966,81 @@ async function run() {
         lastRevenue,
         growthPercentage,
       });
+    });
+
+    // categories
+    app.get("/categories", async (req, res) => {
+      const result = await categoryCollection.find().toArray();
+      res.send(result);
+    });
+
+    // app.patch("/category", async (req, res) => {
+    //   const { id, ...updateInfo } = req.body;
+    //   console.log(id);
+
+    //   if (!id || Object.keys(updateInfo).length === 0) {
+    //     return res.status(400).send({ error: "No data provided" });
+    //   }
+
+    //   const query = { _id: new ObjectId(id) };
+
+    //   const isExist = await categoryCollection.findOne(query);
+    //   if (isExist) {
+    //     const result = await categoryCollection.updateOne(query, {
+    //       $set: { ...updateInfo, updatedTime: Date.now() },
+    //     });
+
+    //     return res.send(result);
+    //   }
+
+    //   const updateDoc = { $set: { ...updateInfo, createdAt: Date.now() } };
+    //   const options = { upsert: true };
+
+    //   const result = await categoryCollection.updateOne(
+    //     query,
+    //     updateDoc,
+    //     options
+    //   );
+    //   res.send(result);
+    // });
+
+    app.patch("/category", async (req, res) => {
+      const { id, ...updateInfo } = req.body;
+
+      if (Object.keys(updateInfo).length === 0) {
+        return res.status(400).send({ error: "No data provided" });
+      }
+
+      const query = id ? { _id: new ObjectId(id) } : null;
+
+      if (query) {
+        const isExist = await categoryCollection.findOne(query);
+
+        if (isExist) {
+          const result = await categoryCollection.updateOne(query, {
+            $set: { ...updateInfo, updatedTime: Date.now() },
+          });
+          return res.send(result);
+        }
+      }
+
+      const { categoryName, icon, categoryImage } = updateInfo;
+
+      if (!categoryName || !icon || !categoryImage) {
+        return res.status(400).send({ error: "Incomplete category data" });
+      }
+
+      const updateDoc = {
+        $set: { ...updateInfo, createdAt: Date.now() },
+      };
+
+      const result = await categoryCollection.updateOne(
+        { categoryName },
+        updateDoc,
+        { upsert: true }
+      );
+
+      res.send(result);
     });
 
     // live chat
