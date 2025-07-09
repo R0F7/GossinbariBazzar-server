@@ -10,6 +10,7 @@ const { Server } = require("socket.io");
 const http = require("http");
 const server = http.createServer(app);
 const admin = require("firebase-admin");
+const cron = require("node-cron");
 const port = process.env.PORT || 7777;
 // admin.initializeApp();
 
@@ -759,7 +760,25 @@ async function run() {
     });
 
     app.get("/order-for-admin", async (req, res) => {
-      const result = await orderCollection.find().toArray();
+      const { status, searchTerm } = req.query;
+      const query = {};
+
+      if (status) {
+        query.status = status;
+      }
+
+      if (searchTerm?.trim() && searchTerm !== "null") {
+        const regex = new RegExp(searchTerm, "i");
+        query.$or = [
+          { orderID: regex },
+          { "shippingDetails.trackingNumber": regex },
+        ];
+      }
+
+      const result = await orderCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
     });
 
@@ -802,6 +821,17 @@ async function run() {
           .status(500)
           .json({ message: "Update failed", error: error.message });
       }
+    });
+
+    // order status update
+    app.patch("/order-status-update/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = { $set: { status: status } };
+
+      const result = await orderCollection.updateOne(query, updateDoc);
+      res.send(result);
     });
 
     // order shipping status update
@@ -858,14 +888,9 @@ async function run() {
       res.send(result);
     });
 
-    // order status update
-    app.patch("/order-status-update/:id", async (req, res) => {
-      const { id } = req.params;
-      const { status } = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { status: status } };
-
-      const result = await orderCollection.updateOne(query, updateDoc);
+    // get all payout
+    app.get("/payout", async (req, res) => {
+      const result = await payoutCollection.find().toArray();
       res.send(result);
     });
 
@@ -877,6 +902,288 @@ async function run() {
         .toArray();
       res.send(result);
     });
+
+    // Route: Create Express Account for Vendor
+    app.post("/create-stripe-account", async (req, res) => {
+      const { email, vendor_name, bank_account } = req.body;
+
+      try {
+        // 1. Create Stripe Express Account
+        const account = await stripe.accounts.create({
+          type: "express",
+          email,
+          capabilities: { transfers: { requested: true } },
+        });
+
+        // 2. Create onboarding link
+        const accountLink = await stripe.accountLinks.create({
+          account: account.id,
+          refresh_url: "http://localhost:5173",
+          return_url: "http://localhost:5173",
+          type: "account_onboarding",
+        });
+
+        // 3. Prepare full vendor_info object
+        const vendor_info = {
+          vendor_name,
+          bank_account,
+          stripe_account_id: account.id,
+          requestedAt: new Date(),
+        };
+
+        // console.log("vendor_info to update:", vendor_info);
+
+        // 4. Update user with full vendor_info
+        const updateRes = await usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              vendor_info,
+              status: "Requested",
+            },
+          }
+        );
+
+        // console.log("User update result:", updateRes);
+
+        // 5. Return Stripe onboarding URL
+        res.send({ url: accountLink.url });
+      } catch (error) {
+        console.error("Stripe error:", error);
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    // app.get("/test-payout", async (req, res) => {
+    //   try {
+    //     await generateMonthlyPayouts();
+    //     res.send("Payout test completed");
+    //   } catch (err) {
+    //     console.error(err);
+    //     res.status(500).send("Error");
+    //   }
+    // });
+
+    // প্রতি মিনিটে test করার জন্য:
+    // cron.schedule("* * * * *", async () => {
+    //   console.log("⏱️ Cron running for test...");
+    // });
+    // await generateMonthlyPayouts();
+
+    cron.schedule(
+      "0 10 1 * *",
+      async () => {
+        await generateMonthlyPayouts();
+      },
+      {
+        timezone: "Asia/Dhaka",
+      }
+    );
+
+    async function generateMonthlyPayouts() {
+      const vendors = await usersCollection.find({ role: "seller" }).toArray();
+      // console.log("vendors", vendors);
+
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+
+      // Start and end of current month
+      const startOfMonth = new Date(currentYear, currentMonth, 1);
+      const endOfMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
+
+      for (const vendor of vendors) {
+        // Check if payout already exists for this vendor in current month
+        const alreadyExists = await payoutCollection.findOne({
+          vendorEmail: vendor.email,
+          payoutDate: {
+            $gte: new Date(currentYear, currentMonth, 1),
+            $lte: new Date(currentYear, currentMonth + 1, 0),
+          },
+        });
+
+        console.log("alreadyExists", alreadyExists);
+        if (alreadyExists) continue; // skip if already paid or pending
+
+        // Calculate payout amount from orders
+        // Filter only current month's delivered products
+        // console.log(vendor.email);
+        const startISO = startOfMonth.toISOString();
+        const endISO = endOfMonth.toISOString();
+
+        const orders = await orderCollection
+          .find({
+            status: "Delivered",
+            "shippingDetails.shippedDate": {
+              $gte: startISO,
+              $lte: endISO,
+            },
+            products: {
+              $elemMatch: {
+                "vendor_info.email": vendor.email,
+              },
+            },
+          })
+          .toArray();
+
+        // console.log("orders", orders);
+        const totalAmount = calculateVendorEarning(orders, vendor.email);
+        // console.log("totalAmount",totalAmount);
+
+        if (totalAmount === 0) continue;
+
+        const newPayout = {
+          vendorEmail: vendor.email,
+          amount: totalAmount,
+          status: "Pending",
+          method: "Bank Transfer",
+          // transactionId: generateTrxId(), // helper function
+          payoutDate: new Date(currentYear, currentMonth, 7, 10, 0, 0),
+          note: `Monthly payout for ${getMonthName(currentMonth)}`,
+          bankAccount: vendor.vendor_info.bank_account || "Not Provided",
+        };
+
+        await payoutCollection.insertOne(newPayout);
+      }
+    }
+
+    function calculateVendorEarning(orders, vendorEmail) {
+      let total = 0;
+      for (const order of orders) {
+        for (const product of order.products) {
+          if (product.vendor_info.email === vendorEmail) {
+            const price = product.discounted_price || product.price;
+            total += price * product.quantity;
+          }
+        }
+      }
+      return total;
+    }
+
+    function getMonthName(index) {
+      return [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ][index];
+    }
+
+    // Auto Payout on 7th day of every month at 10:00 AM
+    // cron.schedule(
+    //   "0 10 7 * *",
+    //   async () => {
+    //     console.log("Running vendor payout job");
+    //     try {
+    //       const vendors = await usersCollection
+    //         .find({
+    //           "vendor_info.stripe_account_id": { $exists: true },
+    //         })
+    //         .toArray();
+
+    //       for (const vendor of vendors) {
+    //         const stripeAccountId = vendor.vendor_info.stripe_account_id;
+
+    //         // Calculate total payout (customize as needed)
+    //         const payments = await payoutCollection
+    //           .find({
+    //             vendorEmail: vendor.email,
+    //             status: { $ne: "Paid" },
+    //           })
+    //           .toArray();
+
+    //         const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+
+    //         if (totalAmount > 0) {
+    //           const payout = await stripe.transfers.create({
+    //             amount: Math.floor(totalAmount * 100), // cents
+    //             currency: "usd",
+    //             destination: stripeAccountId,
+    //             description: `Monthly payout for ${vendor.email}`,
+    //           });
+
+    //           // Mark payments as paid
+    //           const paymentIds = payments.map((p) => p._id);
+    //           await payoutCollection.updateMany(
+    //             { _id: { $in: paymentIds } },
+    //             { $set: { status: "Paid", paidAt: new Date() } }
+    //           );
+
+    //           console.log(`Paid $${totalAmount} to ${vendor.email}`);
+    //         }
+    //       }
+    //     } catch (error) {
+    //       console.error("Payout error:", error);
+    //     }
+    //   },
+    //   {
+    //     timezone: "Asia/Dhaka",
+    //   }
+    // );
+
+    // app.get("/test-vendor-payout", async (req, res) => {
+    //   try {
+    //     console.log("⏱️ Manual payout test started...");
+    //     await runVendorPayout(); // cron এর ভিতরের function এখানে call করবে
+    //     res.send("✅ Vendor payout test complete.");
+    //   } catch (err) {
+    //     console.error("❌ Payout test failed:", err);
+    //     res.status(500).send("Error during payout test.");
+    //   }
+    // });
+
+    cron.schedule(
+      "0 10 7 * *",
+      async () => {
+        await runVendorPayout();
+      },
+      {
+        timezone: "Asia/Dhaka",
+      }
+    );
+
+    async function runVendorPayout() {
+      const vendors = await usersCollection
+        .find({ "vendor_info.stripe_account_id": { $exists: true } })
+        .toArray();
+
+      for (const vendor of vendors) {
+        const stripeAccountId = vendor.vendor_info.stripe_account_id;
+        // console.log("stripeAccountId",stripeAccountId);
+        // console.log(vendor.email);
+        const payments = await payoutCollection
+          .find({ vendorEmail: vendor.email, status: { $ne: "Paid" } })
+          .toArray();
+        // console.log(payments);
+
+        const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+        // console.log(totalAmount);
+
+        if (totalAmount > 0) {
+          const payout = await stripe.transfers.create({
+            amount: Math.floor(totalAmount * 100),
+            currency: "usd",
+            destination: stripeAccountId,
+            description: `Monthly payout for ${vendor.email}`,
+          });
+
+          const paymentIds = payments.map((p) => p._id);
+          await payoutCollection.updateMany(
+            { _id: { $in: paymentIds } },
+            { $set: { status: "Paid", paidAt: new Date() } }
+          );
+
+          // console.log(`✅ Paid $${totalAmount} to ${vendor.email}`);
+        }
+      }
+    }
 
     // calculate revenue current to last month
     app.get("/revenue/:email", async (req, res) => {
