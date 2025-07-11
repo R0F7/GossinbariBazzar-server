@@ -759,6 +759,7 @@ async function run() {
       }
     });
 
+    // all order
     app.get("/order-for-admin", async (req, res) => {
       const { status, searchTerm } = req.query;
       const query = {};
@@ -832,6 +833,68 @@ async function run() {
 
       const result = await orderCollection.updateOne(query, updateDoc);
       res.send(result);
+    });
+
+    // return orders
+    app.get("/return-orders/:email", async (req, res) => {
+      const { email } = req.params;
+
+      const query = {
+        "products.vendor_info.email": email,
+        returns: { $exists: true, $ne: [] },
+      };
+
+      const projection = {
+        returns: 1,
+        order_owner_info: 1,
+        paymentInfo: 1,
+        _id: 0,
+      };
+
+      const returnedItems = await orderCollection
+        .find(query)
+        .project(projection)
+        .toArray();
+
+      const allReturns = returnedItems.flatMap((order) =>
+        order.returns.map((info) => ({
+          ...info,
+          order_owner_info: order.order_owner_info,
+          paymentInfo: order.paymentInfo,
+        }))
+      );
+
+      res.send(allReturns);
+    });
+
+    // refund payment
+    app.post("/refund", async (req, res) => {
+      const { info } = req.body;
+      const { requestID, orderID, amount, transactionId, status } = info;
+
+      if (amount < 0 || status !== "Approved") return;
+
+      try {
+        const refund = await stripe.refunds.create({
+          payment_intent: transactionId,
+          ...(amount && { amount }),
+        });
+
+        const order = await orderCollection.updateOne(
+          { orderID, "returns.requestID": requestID },
+          {
+            $set: {
+              "returns.$.status": "Completed",
+              "returns.$.paymentStatus": "Paid",
+            },
+          }
+        );
+
+        res.send({ success: true });
+      } catch (err) {
+        console.error("Refund Error:", err.message);
+        res.status(500).send({ success: false, message: err.message });
+      }
     });
 
     // order shipping status update
@@ -980,42 +1043,113 @@ async function run() {
       }
     );
 
+    // base current month
+    // async function generateMonthlyPayouts() {
+    //   const vendors = await usersCollection.find({ role: "seller" }).toArray();
+    //   // console.log("vendors", vendors);
+
+    //   const currentMonth = new Date().getMonth();
+    //   const currentYear = new Date().getFullYear();
+
+    //   // Start and end of current month
+    //   const startOfMonth = new Date(currentYear, currentMonth, 1);
+    //   const endOfMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
+
+    //   for (const vendor of vendors) {
+    //     // Check if payout already exists for this vendor in current month
+    //     const alreadyExists = await payoutCollection.findOne({
+    //       vendorEmail: vendor.email,
+    //       payoutDate: {
+    //         $gte: new Date(currentYear, currentMonth, 1),
+    //         $lte: new Date(currentYear, currentMonth + 1, 0),
+    //       },
+    //     });
+
+    //     console.log("alreadyExists", alreadyExists);
+    //     if (alreadyExists) continue; // skip if already paid or pending
+
+    //     // Calculate payout amount from orders
+    //     // Filter only current month's delivered products
+    //     // console.log(vendor.email);
+    //     const startISO = startOfMonth.toISOString();
+    //     const endISO = endOfMonth.toISOString();
+
+    //     const orders = await orderCollection
+    //       .find({
+    //         status: "Delivered",
+    //         "shippingDetails.shippedDate": {
+    //           $gte: startISO,
+    //           $lte: endISO,
+    //         },
+    //         products: {
+    //           $elemMatch: {
+    //             "vendor_info.email": vendor.email,
+    //           },
+    //         },
+    //       })
+    //       .toArray();
+
+    //     // console.log("orders", orders);
+    //     const totalAmount = calculateVendorEarning(orders, vendor.email);
+    //     // console.log("totalAmount",totalAmount);
+
+    //     if (totalAmount === 0) continue;
+
+    //     const newPayout = {
+    //       vendorEmail: vendor.email,
+    //       amount: totalAmount,
+    //       status: "Pending",
+    //       method: "Bank Transfer",
+    //       // transactionId: generateTrxId(), // helper function
+    //       payoutDate: new Date(currentYear, currentMonth, 7, 10, 0, 0),
+    //       note: `Monthly payout for ${getMonthName(currentMonth)}`,
+    //       bankAccount: vendor.vendor_info.bank_account || "Not Provided",
+    //     };
+
+    //     await payoutCollection.insertOne(newPayout);
+    //   }
+    // }
+
+    // base last month
     async function generateMonthlyPayouts() {
       const vendors = await usersCollection.find({ role: "seller" }).toArray();
-      // console.log("vendors", vendors);
 
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
+      const now = new Date();
+      const lastMonth = now.getMonth() - 1;
+      const yearOfLastMonth =
+        lastMonth < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const monthIndex = (lastMonth + 12) % 12;
 
-      // Start and end of current month
-      const startOfMonth = new Date(currentYear, currentMonth, 1);
-      const endOfMonth = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
+      const startOfLastMonth = new Date(yearOfLastMonth, monthIndex, 1);
+      const endOfLastMonth = new Date(
+        yearOfLastMonth,
+        monthIndex + 1,
+        0,
+        23,
+        59,
+        59
+      );
 
       for (const vendor of vendors) {
-        // Check if payout already exists for this vendor in current month
+        // Check if payout already exists for this vendor for that last month
         const alreadyExists = await payoutCollection.findOne({
           vendorEmail: vendor.email,
           payoutDate: {
-            $gte: new Date(currentYear, currentMonth, 1),
-            $lte: new Date(currentYear, currentMonth + 1, 0),
+            $gte: new Date(now.getFullYear(), now.getMonth(), 7, 0, 0, 0),
+            $lte: new Date(now.getFullYear(), now.getMonth(), 7, 23, 59, 59),
           },
+          note: `Monthly payout for ${getMonthName(monthIndex)}`,
         });
 
-        console.log("alreadyExists", alreadyExists);
-        if (alreadyExists) continue; // skip if already paid or pending
+        if (alreadyExists) continue; // Skip if payout already generated
 
-        // Calculate payout amount from orders
-        // Filter only current month's delivered products
-        // console.log(vendor.email);
-        const startISO = startOfMonth.toISOString();
-        const endISO = endOfMonth.toISOString();
-
+        // Get orders that were delivered in last month and belong to this vendor
         const orders = await orderCollection
           .find({
             status: "Delivered",
             "shippingDetails.shippedDate": {
-              $gte: startISO,
-              $lte: endISO,
+              $gte: startOfLastMonth,
+              $lte: endOfLastMonth,
             },
             products: {
               $elemMatch: {
@@ -1025,24 +1159,31 @@ async function run() {
           })
           .toArray();
 
-        // console.log("orders", orders);
         const totalAmount = calculateVendorEarning(orders, vendor.email);
-        // console.log("totalAmount",totalAmount);
 
         if (totalAmount === 0) continue;
+
+        const payoutDate = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          7,
+          10,
+          0,
+          0
+        ); // 7th day 10 AM
 
         const newPayout = {
           vendorEmail: vendor.email,
           amount: totalAmount,
           status: "Pending",
           method: "Bank Transfer",
-          // transactionId: generateTrxId(), // helper function
-          payoutDate: new Date(currentYear, currentMonth, 7, 10, 0, 0),
-          note: `Monthly payout for ${getMonthName(currentMonth)}`,
+          payoutDate,
+          note: `Monthly payout for ${getMonthName(monthIndex)}`, // example: July
           bankAccount: vendor.vendor_info.bank_account || "Not Provided",
         };
 
         await payoutCollection.insertOne(newPayout);
+        console.log(`Payout created for ${vendor.email} - $${totalAmount}`);
       }
     }
 
@@ -1163,8 +1304,12 @@ async function run() {
           .toArray();
         // console.log(payments);
 
-        const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-        // console.log(totalAmount);
+        // const totalAmount =
+        //   payments.reduce((sum, p) => sum + p.amount, 0) * 0.98;
+        // // console.log(totalAmount);
+        const grossAmount = payments.reduce((sum, p) => sum + p.amount, 0);
+        const platformFee = grossAmount * 0.02;
+        const totalAmount = grossAmount - platformFee;
 
         if (totalAmount > 0) {
           const payout = await stripe.transfers.create({
@@ -1281,36 +1426,7 @@ async function run() {
       res.send(result);
     });
 
-    // app.patch("/category", async (req, res) => {
-    //   const { id, ...updateInfo } = req.body;
-    //   console.log(id);
-
-    //   if (!id || Object.keys(updateInfo).length === 0) {
-    //     return res.status(400).send({ error: "No data provided" });
-    //   }
-
-    //   const query = { _id: new ObjectId(id) };
-
-    //   const isExist = await categoryCollection.findOne(query);
-    //   if (isExist) {
-    //     const result = await categoryCollection.updateOne(query, {
-    //       $set: { ...updateInfo, updatedTime: Date.now() },
-    //     });
-
-    //     return res.send(result);
-    //   }
-
-    //   const updateDoc = { $set: { ...updateInfo, createdAt: Date.now() } };
-    //   const options = { upsert: true };
-
-    //   const result = await categoryCollection.updateOne(
-    //     query,
-    //     updateDoc,
-    //     options
-    //   );
-    //   res.send(result);
-    // });
-
+    // patch category
     app.patch("/category", async (req, res) => {
       const { id, ...updateInfo } = req.body;
 
