@@ -92,6 +92,7 @@ async function run() {
     const notifications = db.collection("notifications");
     const payoutCollection = db.collection("payout");
     const categoryCollection = db.collection("categories");
+    const blogsCollection = db.collection("blogs");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -138,7 +139,7 @@ async function run() {
     //get all user
     app.get("/users", async (req, res) => {
       const { role } = req.query;
-      console.log(role);
+      // console.log(role);
 
       const query = {};
 
@@ -192,8 +193,8 @@ async function run() {
       const id = req.params.id;
       const { name, phone_number, address, action, vendor_info } = req.body;
       const filter = { _id: new ObjectId(id) };
-      const status = vendor_info.status;
-      delete vendor_info.status;
+      const status = vendor_info?.status;
+      delete vendor_info?.status;
 
       const updateDoc = {
         // $set: {
@@ -218,7 +219,7 @@ async function run() {
     app.patch("/user-role/:email", async (req, res) => {
       const { email } = req.params;
       const { role, status } = req.body;
-      console.log(role, status);
+      // console.log(role, status);
 
       const filter = { email: email };
       const updateDoc = {
@@ -664,6 +665,7 @@ async function run() {
 
     app.get("/orders-receive/:email", async (req, res) => {
       const { email } = req.params;
+      console.log(email);
       const {
         startDate,
         endDate,
@@ -836,11 +838,11 @@ async function run() {
     });
 
     // return orders
-    app.get("/return-orders/:email", async (req, res) => {
-      const { email } = req.params;
+    app.get("/return-orders", async (req, res) => {
+      // const { email } = req.params;
 
       const query = {
-        "products.vendor_info.email": email,
+        // "products.vendor_info.email": email,
         returns: { $exists: true, $ne: [] },
       };
 
@@ -877,7 +879,7 @@ async function run() {
       try {
         const refund = await stripe.refunds.create({
           payment_intent: transactionId,
-          ...(amount && { amount }),
+          ...(amount && { amount: Math.round(amount * 100) }),
         });
 
         const order = await orderCollection.updateOne(
@@ -1462,6 +1464,17 @@ async function run() {
         updateDoc,
         { upsert: true }
       );
+
+      res.send(result);
+    });
+
+    // blog post
+    app.post("/blog-post", async (req, res) => {
+      const { info } = req.body;
+      const result = await blogsCollection.insertOne({
+        ...info,
+        date: Date.now(),
+      });
 
       res.send(result);
     });
