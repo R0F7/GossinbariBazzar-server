@@ -1471,11 +1471,34 @@ async function run() {
     // blog post
     app.post("/blog-post", async (req, res) => {
       const { info } = req.body;
+      console.log(info);
       const result = await blogsCollection.insertOne({
         ...info,
         date: Date.now(),
       });
 
+      res.send(result);
+    });
+
+    // get blogs
+    app.get("/blogs", async (req, res) => {
+      const { category, search } = req.query;
+      let query = {};
+
+      if (category) {
+        query.category = category;
+      }
+
+      if (search) {
+        const regex = new RegExp(search, "i");
+        query.$or = [
+          { title:  regex },
+          // { description: { $regex: search, $options: "i" } },
+          { tags: regex },
+        ];
+      }
+
+      const result = await blogsCollection.find(query).toArray();
       res.send(result);
     });
 
