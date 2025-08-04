@@ -1482,7 +1482,7 @@ async function run() {
 
     // get blogs
     app.get("/blogs", async (req, res) => {
-      const { category, search } = req.query;
+      const { category, search, blogPage } = req.query;
       let query = {};
 
       if (category) {
@@ -1492,13 +1492,38 @@ async function run() {
       if (search) {
         const regex = new RegExp(search, "i");
         query.$or = [
-          { title:  regex },
+          { title: regex },
           // { description: { $regex: search, $options: "i" } },
           { tags: regex },
         ];
       }
 
-      const result = await blogsCollection.find(query).toArray();
+      if (blogPage) {
+        query.status = "Published";
+      }
+
+      const result = (await blogsCollection.find(query).toArray()).sort(
+        (a, b) => new Date(b.date) - new Date(a.date)
+      );
+      res.send(result);
+    });
+
+    // update blog status
+    app.patch("/blog", async (req, res) => {
+      const {
+        info: { id, status },
+      } = req.body;
+      const result = await blogsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: status } }
+      );
+
+      res.send(result);
+    });
+
+    app.delete("/blog/:id", async (req, res) => {
+      const { id } = req.params;
+      const result = await blogsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
 
