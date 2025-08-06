@@ -1521,9 +1521,71 @@ async function run() {
       res.send(result);
     });
 
+    // delete blog
     app.delete("/blog/:id", async (req, res) => {
       const { id } = req.params;
       const result = await blogsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
+
+    // get all messages users
+    app.get("/conversations/:email", async (req, res) => {
+      const userEmail = req.params.email;
+
+      // Step 1: Find all users who had conversation with this email
+      const participantsRaw = await messagesCollection
+        .aggregate([
+          {
+            $match: {
+              $or: [{ email: userEmail }, { toEmail: userEmail }],
+            },
+          },
+          {
+            $project: {
+              participant: {
+                $cond: [{ $eq: ["$email", userEmail] }, "$toEmail", "$email"],
+              },
+              text: 1,
+              timestamp: 1,
+              email: 1,
+            },
+          },
+          {
+            $sort: { timestamp: -1 },
+          },
+          {
+            $group: {
+              _id: "$participant",
+              lastMessage: { $first: "$text" },
+              timestamp: { $first: "$timestamp" },
+              email: { $first: "$email" },
+            },
+          },
+        ])
+        .toArray();
+
+      // Optional: fetch user info for those participants
+      const participantEmails = participantsRaw.map((p) => p._id);
+      const users = await usersCollection
+        .find({
+          email: { $in: participantEmails },
+        })
+        .toArray();
+
+      // Merge user info with messages
+      const result = participantsRaw.map((p) => {
+        const user = users.find((u) => u.email === p._id);
+        return {
+          name: user.name,
+          image_url: user.image_url,
+          email: user.email,
+          isActive: user.isActive,
+          lastMessage: p.lastMessage,
+          timestamp: p.timestamp,
+          form: p.email,
+        };
+      });
+
       res.send(result);
     });
 
@@ -1538,17 +1600,29 @@ async function run() {
       });
 
       // Load previous messages when user joins
-      socket.on("loadMessages", async (email) => {
-        const chatHistory = await messagesCollection.find({ email }).toArray();
+      socket.on("loadMessages", async (payload) => {
+        const { email, toEmail } = payload || {};
+        if (!email || !toEmail) {
+          return;
+        }
+
+        const chatHistory = await messagesCollection
+          .find({
+            $or: [
+              { email, toEmail },
+              { email: toEmail, toEmail: email },
+            ],
+          })
+          .toArray();
         socket.emit("previousMessages", chatHistory);
       });
 
       // Handle new message
       socket.on("sendMessage", async (data) => {
-        const { email, userType, text } = data;
+        const { email, toEmail, text } = data;
         const newMessage = {
           email,
-          userType,
+          toEmail,
           text,
           timestamp: new Date(),
         };
