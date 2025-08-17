@@ -93,6 +93,7 @@ async function run() {
     const payoutCollection = db.collection("payout");
     const categoryCollection = db.collection("categories");
     const blogsCollection = db.collection("blogs");
+    const ticketsCollection = db.collection("tickets");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -1273,11 +1274,11 @@ async function run() {
 
     // app.get("/test-vendor-payout", async (req, res) => {
     //   try {
-    //     console.log("⏱️ Manual payout test started...");
-    //     await runVendorPayout(); // cron এর ভিতরের function এখানে call করবে
-    //     res.send("✅ Vendor payout test complete.");
+    //     console.log(" Manual payout test started...");
+    //     await runVendorPayout();
+    //     res.send(" Vendor payout test complete.");
     //   } catch (err) {
-    //     console.error("❌ Payout test failed:", err);
+    //     console.error(" Payout test failed:", err);
     //     res.status(500).send("Error during payout test.");
     //   }
     // });
@@ -1532,7 +1533,7 @@ async function run() {
     app.get("/conversations/:email", async (req, res) => {
       const userEmail = req.params.email;
 
-      // Step 1: Find all users who had conversation with this email
+      // Find all users who had conversation with this email
       const participantsRaw = await messagesCollection
         .aggregate([
           {
@@ -1564,7 +1565,7 @@ async function run() {
         ])
         .toArray();
 
-      // Optional: fetch user info for those participants
+      // fetch user info for those participants
       const participantEmails = participantsRaw.map((p) => p._id);
       const users = await usersCollection
         .find({
@@ -1577,14 +1578,20 @@ async function run() {
         const user = users.find((u) => u.email === p._id);
         return {
           name: user.name,
+          role: user.role,
           image_url: user.image_url,
           email: user.email,
           isActive: user.isActive,
+          number: user.number,
+          address: user.address,
+          lastLogin: user.lastLogin,
           lastMessage: p.lastMessage,
           timestamp: p.timestamp,
           form: p.email,
         };
       });
+
+      result.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
       res.send(result);
     });
@@ -1645,6 +1652,25 @@ async function run() {
     //   await admin.auth().setCustomUserClaims(uid, { admin: true });
     //   console.log("Admin role assigned to user");
     // };
+
+    // create ticket
+    app.post("/create-ticket", async (req, res) => {
+      const data = req.body;
+      const result = await ticketsCollection.insertOne({
+        ...data,
+        createdAt: Date.now(),
+      });
+      res.send(result);
+    });
+
+    // get tickets
+    app.get("/tickets/:email", async (req, res) => {
+      const { email } = req.params;
+      const result = await ticketsCollection
+        .find({ "vendorInfo.email": email })
+        .toArray();
+      res.send(result);
+    });
 
     // get notifications
     app.get("/notifications/:email", async (req, res) => {
