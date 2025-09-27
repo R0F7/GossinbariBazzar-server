@@ -1600,6 +1600,8 @@ async function run() {
     io.on("connection", (socket) => {
       // console.log("User connected:", socket.id);
 
+      // --- Live Chat Feature: ---
+
       // User joins chat room
       socket.on("joinChat", (email) => {
         socket.join(email);
@@ -1641,6 +1643,49 @@ async function run() {
         io.to(email).emit("receiveMessage", newMessage);
       });
 
+      // --- Vendor Support Tickets: ---
+
+      // Join a ticket room
+      socket.on("joinTicket", (ticket_id) => {
+        socket.join(ticket_id);
+        // console.log(`User joined ticket room: ${ticket_id}`);
+      });
+
+      // Load previous ticket messages
+      socket.on("loadTicketMessages", async (ticket_id) => {
+        // const { ticket_id } = payload || {};
+        if (!ticket_id) return;
+        
+        const ticket = await ticketsCollection.findOne({
+          _id: new ObjectId(ticket_id),
+        });
+        console.log(ticket);
+        
+        if (ticket) {
+          socket.emit("previousTicketMessages", ticket.conversations || []);
+        }
+      });
+
+      // Handle new ticket message
+      socket.on("sendTicketMessage", async (data) => {
+        const { ticket_id, sender_type, message } = data;
+        const filter = { _id: new ObjectId(ticket_id) };
+        const newMessage = {
+          sender_type,
+          message,
+          timestamp: new Date(),
+        };
+
+        // Save message to DB (push into ticket.conversations array)
+        await ticketsCollection.updateOne(filter, {
+          $push: { conversations: newMessage },
+          $set: { updatedAt: new Date() },
+        });
+
+        // Emit message to all users in this ticket room
+        io.to(ticket_id).emit("receiveTicketMessage", newMessage);
+      });
+
       // User disconnect
       socket.on("disconnect", () => {
         // console.log("User disconnected:", socket.id);
@@ -1664,11 +1709,33 @@ async function run() {
     });
 
     // get tickets
-    app.get("/tickets/:email", async (req, res) => {
-      const { email } = req.params;
-      const result = await ticketsCollection
-        .find({ "vendorInfo.email": email })
-        .toArray();
+    app.get("/tickets", async (req, res) => {
+      const { email } = req.query;
+      const query = {};
+
+      if (email) {
+        query["vendorInfo.email"] = email;
+      }
+
+      const result = await ticketsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // get a ticket
+    app.get("/ticket/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = { _id: new ObjectId(id) };
+      const result = await ticketsCollection.findOne(query);
+      res.send(result);
+    });
+
+    // update ticket status
+    app.patch("/ticket", async (req, res) => {
+      const { _id, status } = req.body;
+      const filter = { _id: new ObjectId(_id) };
+      const result = await ticketsCollection.updateOne(filter, {
+        $set: { status },
+      });
       res.send(result);
     });
 
