@@ -94,6 +94,7 @@ async function run() {
     const categoryCollection = db.collection("categories");
     const blogsCollection = db.collection("blogs");
     const ticketsCollection = db.collection("tickets");
+    const complainCollection = db.collection("complaints");
 
     //auth related api
     app.post("/jwt", async (req, res) => {
@@ -1655,12 +1656,11 @@ async function run() {
       socket.on("loadTicketMessages", async (ticket_id) => {
         // const { ticket_id } = payload || {};
         if (!ticket_id) return;
-        
+
         const ticket = await ticketsCollection.findOne({
           _id: new ObjectId(ticket_id),
         });
-        console.log(ticket);
-        
+
         if (ticket) {
           socket.emit("previousTicketMessages", ticket.conversations || []);
         }
@@ -1736,6 +1736,24 @@ async function run() {
       const result = await ticketsCollection.updateOne(filter, {
         $set: { status },
       });
+      res.send(result);
+    });
+
+    // post complain
+    app.post("/complain", async (req, res) => {
+      const data = req.body;
+      const result = await complainCollection.insertOne({
+        ...data,
+        createdAt: Date.now(),
+      });
+      res.send(result);
+    });
+
+    // get complaints
+    app.get("/complaints/:email", async (req, res) => {
+      const { email } = req.params;
+      const query = { "complainant.email": email };
+      const result = await complainCollection.find(query).toArray();
       res.send(result);
     });
 
